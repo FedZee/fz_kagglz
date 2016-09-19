@@ -8,7 +8,6 @@ print('Importing libraires ...')
 import numpy as np
 import pandas as pd
 from sklearn.ensemble import RandomForestRegressor
-from sklearn.linear_model import LinearRegression
 from sklearn import cross_validation
 import time
 
@@ -77,47 +76,34 @@ def fill_nans(df):
 print('Treating data sets...')
 dummy_values = {}
 dummy_differences = {}
-categorical_feat = [truc for truc in features_dict if features_dict[truc] == 1]
-dummy_my_ride(train_df, test_df, categorical_feat)
+to_be_dummied = [truc for truc in features_dict if features_dict[truc] == 1]
+dummy_my_ride(train_df, test_df, to_be_dummied)
 # Treating NaNs
+'''removing rows - dont do that
+train_df = train_df.dropna(axis = 0)
+test_df = test_df.dropna(axis = 0)
+print('Train / test dataframes sizes after treatment : ' + str(train_df.shape) + ' / ' + str(test_df.shape))'''
 fill_nans(train_df)
 fill_nans(test_df)
+print("Exporting desciptive statistics : train_described.csv & test_described.csv ")
+train_df.describe().to_csv("train_described.csv", index=False)
+test_df.describe().to_csv("test_described.csv", index=False)
 
 ''' ------------------------------------------------------------------------
 2 - ML '''
-''' settings '''
-# Tidying features
-size_feat = ['1stFlrSF', '2ndFlrSF', 'LowQualFinSF', 'GrLivArea', \
-'GarageCars', 'GarageArea', 'WoodDeckSF', 'OpenPorchSF', 'EnclosedPorch', '3SsnPorch', \
-'ScreenPorch', 'PoolArea']
-categ_n_size = categorical_feat + size_feat
-numerical_feat = [feat for feat in features_dict if features_dict[feat] == 0]
-# settings algos
-algorithms = [ \
-(RandomForestRegressor(random_state=1, n_estimators=150, min_samples_split=4, min_samples_leaf=2),
-categ_n_size), \
-(LinearRegression(), numerical_feat) ]
-weight = [1, 1]
+model = RandomForestRegressor(random_state=1, n_estimators=150, min_samples_split=4, min_samples_leaf=2)
 
-''' program '''
 # Convert back to a numpy array
 train_data = train_df.drop('SalePrice', axis = 1).values
 target = train_df['SalePrice']
 test_data = test_df.values
-
-
-full_predictions = []
-for algo, predictors in algorithms:
-    # Training
-    print('Training the machine ...')
-    model = model.fit( train_data, target )
-    # Predicting
-    print('Predicting house prices ...')
-    predictions = model.predict(test_data).astype(int)   # <class 'numpy.ndarray'> ([:,1] in tuto?)
-    full_predictions.append(predictions)
-
-predictions = (full_predictions[0]*weight[0] \
-+ full_predictions[1]*weight[1] + full_predictions[2]*weight[2]) / weight[3]
+# Training
+print('Training the machine ...')
+model = model.fit( train_data, target )
+# Predicting
+print('Predicting house prices ...')
+predictions = model.predict(test_data).astype(int)
+# fonctions helper functions
 
 ''' submission '''
 submission = pd.DataFrame( {"Id": test_df["Id"], "SalePrice": predictions} )
@@ -126,28 +112,3 @@ print('Submission prices stats : \n', submission['SalePrice'].describe())
 submission.to_csv("kaggle.csv", index=False)
 
 print('Done.')
-
-''' TODO ---------------------------------------------------------------------------
-OK - vérifier les valeurs -1
-OK - Vérifier / corriger (systématiser) la cohérence entre les 2 tablaux de correspondance des dummy, dans train & test
-- comprendre score kaggle
-- faire des cv test auto (débugguer :check docu?) sur plusieurs types de modeles et paramétrages
-- étudier les variables à la main. Les comprendre.
-    savoir faire une projection à la main
-    plots de partout. reprendre les plots de velib
-- nouveautés à apprendre
-    - tester XGBoost library (pour RF et GBM)
-    - utiliser Kernels / community learning
-    - lire docu sur les ensembles, afin d'en extraire les meilleures pratiques
-    + check autres trucs d'og 
-    - data analytics style
-- faire une extraction des features lineaires les plus importants
-- faire d'autres analyses d'importance ? Cf. article de bidule sur datascience.net
-- scores : générer score kaggle et en extraire d'autres pour compréhension
-- étudier le overkill analytics
-- Feature engineering :
-    - regrouper des features ?
-        - surfaces
-        - nombre de SdB, etc.
-    - séparer les misc features ?
-    - remplacer year sold par le prix moyen au metre carré de l'année considérée * surface

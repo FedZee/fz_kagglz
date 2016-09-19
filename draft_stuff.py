@@ -15,7 +15,18 @@ features = ["Id", "MSSubClass", "MSZoning", "LotFrontage", "LotArea", "Street", 
 "ScreenPorch", "PoolArea", "PoolQC", "Fence", "MiscFeature", "MiscVal", "MoSold", "YrSold",  \
 "SaleType", "SaleCondition", "SalePrice"]
 
-''' DEBUG LOG
+'''removing rows - dont do that
+train_df = train_df.dropna(axis = 0)
+test_df = test_df.dropna(axis = 0)
+print('Train / test dataframes sizes after treatment : ' + str(train_df.shape) + ' / ' + str(test_df.shape))'''
+
+''' descriptive stats
+print("Exporting desciptive statistics : train_described.csv & test_described.csv ")
+train_df.describe().to_csv("train_described.csv", index=False)
+test_df.describe().to_csv("test_described.csv", index=False)
+'''
+
+''' DEBUG LOG ---------------------------------------------------------------------------
 
 - ValueError: could not convert string to float: 'LwQ'
 => tests : il manque une colonne au describe, pas normal. = 'BsmtFinType2' : mal paramétrée (1 et non 0)
@@ -28,12 +39,15 @@ features = ["Id", "MSSubClass", "MSZoning", "LotFrontage", "LotArea", "Street", 
 non
 => dropna axis = 0 et non 1 ! pour dropper les lignes et non les colonnes
 
+debug cross_validation
+ValueError: Must pass DataFrame with boolean values only
+
 '''
 
 ''' PREDICTIONS LOG
 
 1-
-date: 18 sept
+date: 18 sept 2016
 model : model = RandomForestRegressor(random_state=1, n_estimators=150, min_samples_split=4, min_samples_leaf=2)
 score : 0.14821
 Submission prices stats :  count      1459.000000
@@ -45,15 +59,3 @@ min       59668.000000
 75%      210280.000000
 max      535333.000000
 '''
-
-''' TODO
-vérifier les valeurs -1
-Vérifier / corriger (systématiser) la cohérence entre les 2 tablaux de correspondance des dummy, dans train & test
-comprendre score kaggle
-faire des cv test auto sur plusieurs types de modeles et paramétrages
-faire une extraction des features lineaires les plus importants
-faire d'autres analyses d'importance ? Cf. article de bidule sur datascience.net
-scores : générer score kaggle et en extraire d'autres pour compréhension
-étudier le overkill analytics
-étudier les variables à la main. Les comprendre.
-    plots de partout. reprendre les plots de velib
