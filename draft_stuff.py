@@ -59,3 +59,9 @@ min       59668.000000
 75%      210280.000000
 max      535333.000000
 '''
+
+''' PETITS TAKE AWAYS ---------------------------------------------------------------------------
+
+- LEN & SHAPE
+sur les nd arrays (à dim=1), on peut appliquer len() ou .shape.
+Le premier donnera un int, le second un tuple

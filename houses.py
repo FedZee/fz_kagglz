@@ -8,14 +8,21 @@ print('Importing libraires ...')
 import numpy as np
 import pandas as pd
 from sklearn.ensemble import RandomForestRegressor
+from sklearn.ensemble import GradientBoostingRegressor
 from sklearn.linear_model import LinearRegression
 from sklearn import cross_validation
-import time
+from sklearn.cross_validation import KFold
+from sklearn import metrics
+import math
+#import time
 
 print('Importing data ...')
 train_df = pd.read_csv("train.csv")
 test_df = pd.read_csv("test.csv")
 print('Train / test dataframes sizes : ' + str(train_df.shape) + ' / ' + str(test_df.shape))
+
+''' ------------------------------------------------------------------------
+1 - data cleaning & exploration '''
 
 # features description : numerical or categorical (0 or 1)
 features_dict = {"Id": 0, "MSSubClass": 0, "MSZoning": 1, "LotFrontage": 0, "LotArea": 0, "Street": 1, "Alley": 1, \
@@ -30,13 +37,9 @@ features_dict = {"Id": 0, "MSSubClass": 0, "MSZoning": 1, "LotFrontage": 0, "Lot
 "GarageType": 1, "GarageYrBlt": 0, "GarageFinish": 1, "GarageCars": 0, "GarageArea": 0, "GarageQual": 1,  \
 "GarageCond": 1, "PavedDrive": 1, "WoodDeckSF": 0, "OpenPorchSF": 0, "EnclosedPorch": 0, "3SsnPorch": 0,  \
 "ScreenPorch": 0, "PoolArea": 0, "PoolQC": 1, "Fence": 1, "MiscFeature": 1, "MiscVal": 0, "MoSold": 0, "YrSold": 0,  \
-"SaleType": 1, "SaleCondition": 1, "SalePrice": 0}
-
-''' ------------------------------------------------------------------------
-1 - data cleaning & exploration '''
+"SaleType": 1, "SaleCondition": 1}
 
 # 1.1 - helper functions
-
 
 def categ_values(df, features):
     keys = {}
@@ -84,53 +87,151 @@ fill_nans(train_df)
 fill_nans(test_df)
 
 ''' ------------------------------------------------------------------------
-2 - ML '''
-''' settings '''
-# Tidying features
-size_feat = ['1stFlrSF', '2ndFlrSF', 'LowQualFinSF', 'GrLivArea', \
+2 - ML settings - set the models here '''
+
+# Classifying features
+target = 'SalePrice' # Extract target
+all_feat = list(features_dict.keys())
+size_feat = ['LotArea', '1stFlrSF', '2ndFlrSF', 'LowQualFinSF', 'GrLivArea', \
 'GarageCars', 'GarageArea', 'WoodDeckSF', 'OpenPorchSF', 'EnclosedPorch', '3SsnPorch', \
 'ScreenPorch', 'PoolArea']
 categ_n_size = categorical_feat + size_feat
 numerical_feat = [feat for feat in features_dict if features_dict[feat] == 0]
-# settings algos
-algorithms = [ \
-(RandomForestRegressor(random_state=1, n_estimators=150, min_samples_split=4, min_samples_leaf=2),
-categ_n_size), \
-(LinearRegression(), numerical_feat) ]
-weight = [1, 1]
 
-''' program '''
-# Convert back to a numpy array
-train_data = train_df.drop('SalePrice', axis = 1).values
-target = train_df['SalePrice']
-test_data = test_df.values
+# settings algorithms
+rf1 = RandomForestRegressor(random_state=1, n_estimators=150, min_samples_split=4, min_samples_leaf=2)
+rf_default = RandomForestRegressor(random_state=1, n_estimators=150) # default : min_samples_split=2, min_samples_leaf=1
+algorithms = [ (rf1, categ_n_size), (rf1, all_feat), (rf_default, all_feat)]
+# (LinearRegression(), numerical_feat) ] # NB : bug (Cf. bug log)
+weights = [1, 1, 1] # if number of weights does not match the algorithms', will be filled with 0's
 
+''' ------------------------------------------------------------------------
+3 - ML program '''
 
-full_predictions = []
-for algo, predictors in algorithms:
-    # Training
-    print('Training the machine ...')
-    model = model.fit( train_data, target )
-    # Predicting
-    print('Predicting house prices ...')
-    predictions = model.predict(test_data).astype(int)   # <class 'numpy.ndarray'> ([:,1] in tuto?)
-    full_predictions.append(predictions)
+# 3.1 - Helper functions
+def rmsle(y_true, y_pred): # arguments : arrays or lists ; returns : score
+    ''' Computes the RMSE on logarithmic error = RMSE(logx-logy)
+    Submissions are evaluated on Root-Mean-Squared-Error (RMSE) between the
+    logarithm of the predicted value and the logarithm of the observed sales price.'''
+    # y_pred = fix_negatives(y_pred, y_true) # did not help to fix linear regr° bug
+    y_true_log = np.log(y_true + 1)
+    y_pred_log = np.log(y_pred + 1)
+    count = 0
+    try :
+        return np.sqrt( metrics.mean_squared_error(y_true_log, y_pred_log) )
+    except Exception as error :
+        print('Error in RMSLE function : ' + str(type(error)) + ' ; ' + str(error))
+    return 0
+    #return rmsle(y_true, y_pred)
+'''def fix_negatives(array_bug, array_ref):
+    #Handles a target array that causes logarithm bug, due to supposedly negative values
+    values = []
+    for i in range(len(array_bug)):
+        if array_bug[i] <= 0:
+            values.append(array_bug[i], array_ref[i])
+            array_bug[i] = 0
+    if len(values) > 0:
+        print('Predictions modified for RMSLE computation. Report : ')
+        print(pd.Series(np.concatenate(values)).describe())
+    return array_bug'''
+def rmse(y_true, y_pred):
+    ''' RMSE. More insightful metric. '''
+    return np.sqrt( metrics.mean_squared_error(y_true, y_pred) )
+def train_one_model(alg, predictors_labels, dataframe, target) :
+    ''' Trains & returns a model, and reports about it'''
+    kf = KFold(dataframe.shape[0], n_folds=3, random_state=1)
+    predictions = [] # liste dans laquelle on va stocker les arrays de predictions
+    for train, test in kf:
+        # Setting predictors and target.
+        train_predictors = (dataframe[predictors_labels].iloc[train,:])
+        train_target = dataframe[target].iloc[train]
+        # Training the algorithm
+        alg.fit(train_predictors, train_target)
+        # Make predictions on the test fold
+        test_predictions = alg.predict(dataframe[predictors_labels].iloc[test,:])
+        predictions.append(test_predictions)
+    predictions = np.concatenate(predictions, axis=0) # retourne un array
+    print(type(alg))
+    print('Number of features used : ' + str(len(predictors_labels)))
+    report_scores(predictions, dataframe[target])
+    return alg, predictions
+# train_one_model(rf1, train_df, all_feat, target)
+def report_scores(y_pred, y_true) : # input : y_pred : array ; y_true : Series
+    try :
+        print('RMSLE : ' + str(rmsle(y_pred, y_true.values)))
+    except Exception as error :
+        print('Unexpected error for RMSLE : ' + str(type(error)) + ' ; ' + str(error))
+    try :
+        print('RMSE : ' + str(rmse(y_pred, y_true.values)))
+    except Exception as error :
+        print('Unexpected error for RMSE : ' + str(type(error)) + ' ; ' + + str(error))
+def train_multiple_models(algorithms, dataframe, target) :
+    ''' tests models, reports results (RMSLE),
+    returns the models ready for use + predictions for analysis '''
+    trained_models = []
+    all_predictions = []
+    count = 0
+    for alg, predictors in algorithms :
+        count +=1
+        print('Model n°' + str(count))
+        alg_trained, predictions = train_one_model(alg, predictors, dataframe, target)
+        trained_models.append(alg_trained)
+        all_predictions.append(predictions)
+    return trained_models, all_predictions
+def apply_models(trained_models, weights, test_df) :
+    # Predict
+    full_predictions = []
+    count = 0
+    for alg in trained_models :
+        count += 1
+        print('Applying model n°' + str(count))
+        prediction = alg.predict(test_df)
+        full_predictions.append(prediction)
+    return full_predictions
+def blend(full_p, weights) :
+    ''' Blends predictions: computes weighted average of the regression '''
+    sigma = 0
+    # ensuring consistency of inputs
+    weights = weights[:len(full_p)]
+    weights[len(weights) : len(full_p)] = [0 for i in range(len(full_p) - len(weights))]
+    # computing the blending
+    for number in range(len(full_p)) :
+        sigma += (full_p[number] * weights[number])
+    print('Models blended with the following weights :')
+    print(weights)
+    return sigma / sum(weights)
+def report_stats(trained_models, all_predictions):
+    for i in range(len(all_predictions)) :
+        print('- Model n°' + str(i + 1))
+        print(type(trained_models[i]))
+        print('Model prices stats :')
+        print(pd.Series(all_predictions[i]).describe())
 
-predictions = (full_predictions[0]*weight[0] \
-+ full_predictions[1]*weight[1] + full_predictions[2]*weight[2]) / weight[3]
-
-''' submission '''
+# 3.2 Executing ML
+# Train & report statitics on results
+print('\nTraining & testing models ...')
+trained_models, all_predictions = train_multiple_models(algorithms, train_df, target)
+print('\nResults :')
+print('Actual prices stats : \n', train_df['SalePrice'].describe())
+report_stats(trained_models, all_predictions)
+# Make predictions
+print('\nMaking predictions ...')
+full_predictions = apply_models(trained_models, weights, test_df)
+predictions = blend(full_predictions, weights)
+# Submit
+print('\nExporting submission file')
 submission = pd.DataFrame( {"Id": test_df["Id"], "SalePrice": predictions} )
-print('Train prices stats : \n', train_df['SalePrice'].describe())
 print('Submission prices stats : \n', submission['SalePrice'].describe())
 submission.to_csv("kaggle.csv", index=False)
-
 print('Done.')
+
 
 ''' TODO ---------------------------------------------------------------------------
 OK - vérifier les valeurs -1
 OK - Vérifier / corriger (systématiser) la cohérence entre les 2 tablaux de correspondance des dummy, dans train & test
-- comprendre score kaggle
+OK - permettre la saisie facilitée d'autants de modèles que voulu + blending auto
+OK - rajouter score kaggle
+    - rajouter Kfold testing sur mon set
 - faire des cv test auto (débugguer :check docu?) sur plusieurs types de modeles et paramétrages
 - étudier les variables à la main. Les comprendre.
     savoir faire une projection à la main
@@ -139,7 +240,7 @@ OK - Vérifier / corriger (systématiser) la cohérence entre les 2 tablaux de c
     - tester XGBoost library (pour RF et GBM)
     - utiliser Kernels / community learning
     - lire docu sur les ensembles, afin d'en extraire les meilleures pratiques
-    + check autres trucs d'og 
+    + check autres trucs d'og
     - data analytics style
 - faire une extraction des features lineaires les plus importants
 - faire d'autres analyses d'importance ? Cf. article de bidule sur datascience.net
@@ -151,3 +252,14 @@ OK - Vérifier / corriger (systématiser) la cohérence entre les 2 tablaux de c
         - nombre de SdB, etc.
     - séparer les misc features ?
     - remplacer year sold par le prix moyen au metre carré de l'année considérée * surface
+'''
+
+''' BUG LOG
+- Bug de la régression linéaire
+    - bug 1 : RMSLE
+<class 'ValueError'>
+Input contains NaN, infinity or a value too large for dtype('float64').
+    - bug 2 : application de l'algo sur le test set
+--> 184         prediction = alg.predict(test_df)
+ValueError: shapes (1459,80) and (37,) not aligned: 80 (dim 1) != 37 (dim 0)
+'''
