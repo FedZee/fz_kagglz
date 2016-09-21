@@ -1,4 +1,4 @@
-''' Kaggle House prices challenge
+''' Kagl Houses challenge
 FedZee sept 2016
 '''
 
@@ -41,7 +41,9 @@ features_dict = {"Id": 0, "MSSubClass": 0, "MSZoning": 1, "LotFrontage": 0, "Lot
 
 # 1.1 - helper functions
 
+# Changing categorical values to integers (dummy variables)
 def categ_values(df, features):
+    '''Lists all the different values taken by each given cat. feature, and indexes them'''
     keys = {}
     for feature in features :
         df[feature] = df[feature].astype(str)         # a (seemingly) preliminary step to the next formulae
@@ -49,28 +51,38 @@ def categ_values(df, features):
         values_dict = { name : i for i, name in values }            # sets up a dictionary in the form  value : index
         keys[feature] = values_dict
     return keys
-
-def dummy_my_ride(train, test, features): # , feature_keys) :
-    ''' Changes categorical variables in quick & dirty dummy variables.
-    Saves the dummy keys and the differences between test and train's values'''
-    print('Transforming categorical variables to dummy variables...')
+def generate_dummy_keys(train, test, features):
+    ''' generates consistent dummy keys between train and test sets .
+    Saves the keys and the differences between test and train's values'''
     global dummy_values, dummy_differences
-    dummy_values = {'train': categ_values(train, features), 'test': categ_values(test, features)}
+    # load the values and indexes (dummy keys) for all the features, initialize consistent values
+    dummy_values = {'train': categ_values(train, features), 'test': \
+    categ_values(test, features), 'test_consistent': {} }
     for feature in features :
-        # get the values and their dummy keys
+        # get the feature's values and their dummy keys
         train_values, test_values = dummy_values['train'][feature], dummy_values['test'][feature]
         # make the test set's dummies consistent with the train set's
-        test_values_full = train_values                   # uses the train set's dummy values
+        test_values_full = train_values       # take the train set's dummy values as a basis for test set
         train_only_values = [value for value in train_values if value not in test_values]
         test_only_values = [value for value in test_values if value not in train_values]
         dummy_differences[feature] = {'train only': train_only_values, 'test only': test_only_values}
-        for value in test_only_values:
+        for value in test_only_values:   # reassign dummy keys
             test_values_full[value] = test_values[value] + len(train_values)  # gives a new int value that does not exist in train values
-        # Convert all features strings to int
+        dummy_values['test_consistent'][feature] = test_values_full
+def dummy_my_ride(train, test, features): # , feature_keys) :
+    ''' Changes categorical variables in quick dummy variables,
+    for both train and test set.'''
+    generate_dummy_keys(train, test, features)  # generate keys
+    global dummy_values                         # and access them
+    print('Transforming categorical variables to dummy variables...')
+    for feature in features :
+        # Load the keys
+        train_values, test_values_full = dummy_values['train'][feature], dummy_values['test_consistent'][feature]
+        # Convert all features strings to consistent dummy values integers
         train[feature] = train[feature].apply(lambda x: train_values[x]).astype(int)
         test[feature] = test[feature].apply(lambda x: test_values_full[x]).astype(int) # other possibility : using .feature ? .map method ?
     print(str(len(features)) + ' features transformed. Dummy values and differences saved.')
-
+# Dealing with NaNs
 def fill_nans(df):
     ''' Fills NaN with -1 (in order to differentiate it from other values. Check done : no negative values in dataset '''
     for feature in df.columns:
@@ -100,10 +112,12 @@ numerical_feat = [feat for feat in features_dict if features_dict[feat] == 0]
 
 # settings algorithms
 rf1 = RandomForestRegressor(random_state=1, n_estimators=150, min_samples_split=4, min_samples_leaf=2)
-rf_default = RandomForestRegressor(random_state=1, n_estimators=150) # default : min_samples_split=2, min_samples_leaf=1
-algorithms = [ (rf1, categ_n_size), (rf1, all_feat), (rf_default, all_feat)]
+rf_overfit = RandomForestRegressor(random_state=1, n_estimators=150) # default : min_samples_split=2, min_samples_leaf=1
+gbm = GradientBoostingRegressor(random_state=1, n_estimators=25, max_depth=3)
+# these will be the chosen algorithms (& features set) for test, and how you blend them
+algorithms = [ (rf1, categ_n_size), (rf1, all_feat), (rf_overfit, all_feat), (gbm, all_feat)]
 # (LinearRegression(), numerical_feat) ] # NB : bug (Cf. bug log)
-weights = [1, 1, 1] # if number of weights does not match the algorithms', will be filled with 0's
+weights = [0, 1, 0, 1] # if number of weights does not match the algorithms', will be filled with 0's
 
 ''' ------------------------------------------------------------------------
 3 - ML program '''
@@ -122,21 +136,19 @@ def rmsle(y_true, y_pred): # arguments : arrays or lists ; returns : score
     except Exception as error :
         print('Error in RMSLE function : ' + str(type(error)) + ' ; ' + str(error))
     return 0
-    #return rmsle(y_true, y_pred)
-'''def fix_negatives(array_bug, array_ref):
-    #Handles a target array that causes logarithm bug, due to supposedly negative values
-    values = []
-    for i in range(len(array_bug)):
-        if array_bug[i] <= 0:
-            values.append(array_bug[i], array_ref[i])
-            array_bug[i] = 0
-    if len(values) > 0:
-        print('Predictions modified for RMSLE computation. Report : ')
-        print(pd.Series(np.concatenate(values)).describe())
-    return array_bug'''
 def rmse(y_true, y_pred):
-    ''' RMSE. More insightful metric. '''
+    ''' RMSE. Somewhat more insightful metric. '''
     return np.sqrt( metrics.mean_squared_error(y_true, y_pred) )
+def report_scores(y_pred, y_true) : # input : y_pred : array ; y_true : Series
+    '''Reports scores ...'''
+    try :
+        print('RMSLE : ' + str(rmsle(y_pred, y_true.values)))
+    except Exception as error :
+        print('Unexpected error for RMSLE : ' + str(type(error)) + ' ; ' + str(error))
+    try :
+        print('RMSE : ' + str(rmse(y_pred, y_true.values)))
+    except Exception as error :
+        print('Unexpected error for RMSE : ' + str(type(error)) + ' ; ' + + str(error))
 def train_one_model(alg, predictors_labels, dataframe, target) :
     ''' Trains & returns a model, and reports about it'''
     kf = KFold(dataframe.shape[0], n_folds=3, random_state=1)
@@ -156,15 +168,6 @@ def train_one_model(alg, predictors_labels, dataframe, target) :
     report_scores(predictions, dataframe[target])
     return alg, predictions
 # train_one_model(rf1, train_df, all_feat, target)
-def report_scores(y_pred, y_true) : # input : y_pred : array ; y_true : Series
-    try :
-        print('RMSLE : ' + str(rmsle(y_pred, y_true.values)))
-    except Exception as error :
-        print('Unexpected error for RMSLE : ' + str(type(error)) + ' ; ' + str(error))
-    try :
-        print('RMSE : ' + str(rmse(y_pred, y_true.values)))
-    except Exception as error :
-        print('Unexpected error for RMSE : ' + str(type(error)) + ' ; ' + + str(error))
 def train_multiple_models(algorithms, dataframe, target) :
     ''' tests models, reports results (RMSLE),
     returns the models ready for use + predictions for analysis '''
